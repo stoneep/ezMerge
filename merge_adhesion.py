@@ -13,6 +13,20 @@ from .merge_nodes import (
 )
 
 
+def _deformation_region(nodes, links, distance, influence):
+    """Source-distance boundary, independent of profile, pull and travel.
+
+    Region means eligible for deformation, not guaranteed displacement or
+    exact contact. Distance is measured in A's local coordinate system.
+    """
+    normalized = _math(nodes, links, 'DIVIDE', distance,
+                       _math(nodes, links, 'MAXIMUM', influence, 1e-6), clamp=True)
+    region = _math(nodes, links, 'MULTIPLY',
+                   _math(nodes, links, 'LESS_THAN', distance, influence),
+                   _math(nodes, links, 'GREATER_THAN', influence, 1e-6))
+    return region, normalized
+
+
 def _falloff_weight(nodes, links, gin, distance, influence):
     """Pinned contact/outside weights for presets or the editable custom curve."""
     u = _math(nodes, links, 'DIVIDE', distance, _math(nodes, links, 'MAXIMUM', influence, 1e-6), clamp=True)
@@ -520,7 +534,7 @@ def _build_adhesion(ng):
     cn._new_input(ng, GLOBAL, 'NodeSocketFloat', 1.0, 0.0, 100.0,
                   'Scales influence, merge, push, spread and clearance together; preserves their ratios')
     for name, value, description in (
-        (INFLUENCE_RADIUS, 0.16, 'Outer distance from B affected by adhesion, measured in A local units'),
+        (INFLUENCE_RADIUS, 0.16, 'Deformation may start where source distance to B is below this radius times Global Merge; A local units'),
         (MERGE_RADIUS, 0.08, 'Distance band reshaped toward B; not bead height'),
         (PUSH_STRENGTH, 0.08, 'Maximum outward travel along B; not normal displacement'),
         (SURFACE_SPREAD, 0.0, 'Extra travel along B near the contact; capped at Influence Radius for stability'),
@@ -622,7 +636,10 @@ def _build_adhesion(ng):
     tangent = _vector(nodes, links, 'NORMALIZE', _vector(nodes, links, 'SUBTRACT', own_normal,
                       _vector(nodes, links, 'SCALE', normal,
                               scale=_vector(nodes, links, 'DOT_PRODUCT', own_normal, normal))))
+    region, region_distance = _deformation_region(nodes, links, distance, influence)
     weight = _falloff_weight(nodes, links, gin, distance, influence)
+    # Profiles distribute strength only inside the independently defined band.
+    weight = _math(nodes, links, 'MULTIPLY', weight, region)
     pull = _normal_pull(nodes, links, gin, distance, merge, weight)
     slid = _vector(nodes, links, 'ADD', q, _vector(nodes, links, 'SCALE', tangent,
                    scale=_math(nodes, links, 'MULTIPLY', push, weight)))
@@ -678,6 +695,7 @@ def _build_adhesion(ng):
     links.new(position, source_position.inputs['Value'])
     geometry = source_position.outputs['Geometry']
     for name, value in ((ADHESION_WEIGHT, weight), (ADHESION_DISTANCE, distance),
+                        (ADHESION_REGION, region), (ADHESION_REGION_DISTANCE, region_distance),
                         (ADHESION_SPREAD_PLANNED, spread_planned), (ADHESION_SPREAD_TAKEN, spread_taken)):
         store = nodes.new('GeometryNodeStoreNamedAttribute')
         store.data_type, store.domain = 'FLOAT', 'POINT'

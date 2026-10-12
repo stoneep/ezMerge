@@ -31,7 +31,7 @@ BEAD_KEY = "ezhs_merge_bead"
 BEAD_VERSION = 13
 BEAD_GROUP_NAME = "EZ Merge Bead"
 ADHESION_KEY = "ezhs_surface_adhesion"
-ADHESION_VERSION = 7
+ADHESION_VERSION = 8
 # Builder policy values; changing their behavior requires an adhesion version bump.
 ADHESION_DEFAULT_LEVELS = 4
 ADHESION_SPREAD_STEPS = 4
@@ -53,6 +53,8 @@ ADHESION_LOCAL_SUBDIVISION = "Local Subdivision"
 ADHESION_ADAPTIVE_SPREAD = "Adaptive Spread"
 ADHESION_WEIGHT = "ezhs_adhesion_weight"
 ADHESION_DISTANCE = "ezhs_adhesion_distance"
+ADHESION_REGION = "ezhs_adhesion_region"
+ADHESION_REGION_DISTANCE = "ezhs_adhesion_region_distance"
 ADHESION_SOURCE_POSITION = "ezhs_adhesion_source_position"
 ADHESION_SPREAD_PLANNED = "ezhs_spread_planned_steps"
 ADHESION_SPREAD_TAKEN = "ezhs_spread_taken_steps"
