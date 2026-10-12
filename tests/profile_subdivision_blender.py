@@ -16,6 +16,7 @@ from profile_tangent_probe import build_tangent_profile
 from profile_contact_probe import add_contact_probe
 from profile_normal_probe import add_normal_probe
 from profile_underface_probe import add_underface_probe
+from profile_fold_probe import diagnose_profile
 root = Path(__file__).resolve().parents[1]
 package = types.ModuleType('subdivision_profile')
 package.__path__ = [str(root)]
@@ -160,6 +161,10 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
               'outside delta',max(outside_deltas),'positions/topology unchanged',flush=True)
     if underface_mode != 'remove-cap':
         assert topology == reference_topology, 'Adhesion changed connectivity'
+    if '--fold-probe' in sys.argv:
+        if underface_mode == 'remove-cap':
+            raise ValueError('Fold comparison requires identical face connectivity')
+        diagnose_profile(reference, points, topology[1])
     assert distances is not None
     foot = [p for p,d in zip(points,distances) if d < 1e-6]
     exact_source_contact = bool(foot)
