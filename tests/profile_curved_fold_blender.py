@@ -12,6 +12,8 @@ sys.path.insert(0,str(root/'tests'))
 from boolean_free_probe import bypass_adhesion_boolean
 from profile_tangent_probe import build_tangent_profile
 from profile_fold_probe import diagnose_mesh,strict_mesh_crossings,verify_extended_classifier
+from profile_contact_probe import add_contact_probe
+from profile_contact_measure import measure_contact
 package = types.ModuleType('curved_fold_test')
 package.__path__ = [str(root)]
 sys.modules[package.__name__] = package
@@ -26,20 +28,27 @@ assert strict_mesh_crossings(synthetic,[(0,1,2),(3,4,5)])[0]
 assert not strict_mesh_crossings(synthetic,[(0,1,2)])[0]
 verify_extended_classifier()
 
-def capture(obj):
+def capture(obj,with_distance=False):
     obj.update_tag()
     bpy.context.view_layer.update()
     evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
     mesh = evaluated.to_mesh()
     try:
         mesh.calc_loop_triangles()
-        return ([v.co.copy() for v in mesh.vertices],
+        result = ([v.co.copy() for v in mesh.vertices],
                 [tuple(t.vertices) for t in mesh.loop_triangles],
                 [tuple(p.vertices) for p in mesh.polygons])
+        if with_distance:
+            attr = mesh.attributes.get(merges.ADHESION_DISTANCE)
+            assert attr is not None
+            return result+([item.value for item in attr.data],)
+        return result
     finally:
         evaluated.to_mesh_clear()
 
 for inside in (False,True):
+    if '--inner-only' in sys.argv and not inside:
+        continue
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete(use_global=False)
     bpy.ops.mesh.primitive_uv_sphere_add(segments=48,ring_count=24,radius=2)
@@ -53,7 +62,7 @@ for inside in (False,True):
         bpy.ops.mesh.flip_normals()
         bpy.ops.object.mode_set(mode='OBJECT')
     n,rings = 32,12
-    lo,hi = (0.65,1.85) if inside else (1.85,3.05)
+    lo,hi = (0.65,2.05) if inside else (1.85,3.05)
     vertices = [(.35*math.cos(2*math.pi*i/n),.35*math.sin(2*math.pi*i/n),lo+(hi-lo)*j/rings)
                 for j in range(rings+1) for i in range(n)]
     faces = [(j*n+i,j*n+(i+1)%n,(j+1)*n+(i+1)%n,(j+1)*n+i)
@@ -82,11 +91,23 @@ for inside in (False,True):
     cn.set_input(mod,merges.GLOBAL,1)
     for spread in (0,.15):
         cn.set_input(mod,merges.SURFACE_SPREAD,spread)
-        points,triangles,current_topology = capture(obj)
+        points,triangles,current_topology,distances = capture(obj,with_distance=True)
         assert current_topology == topology
         assert all(math.isfinite(c) for p in points for c in p)
         assert max((p-q).length for p,q in zip(points,reference)) > .01
         print('CASE','inner-wall' if inside else 'outer-surface','spread',spread,flush=True)
+        contact_modifier = contact_group = None
+        if '--contact-check' in sys.argv:
+            measure_contact(obj,base,points,distances,label='before reattachment',faces=current_topology)
+            before_points = points
+            contact_modifier,contact_group = add_contact_probe(obj,base,builder,mode='soft')
+            points,triangles,corrected_topology,distances = capture(obj,with_distance=True)
+            assert corrected_topology == current_topology
+            outside = [(p-q).length for p,q,d in zip(points,before_points,distances) if d>=.25]
+            assert max(outside,default=0) < 1e-7
+            measure_contact(obj,base,points,distances,label='after soft reattachment',faces=corrected_topology)
+            print('CONTACT correction maximum movement',max((p-q).length for p,q in zip(points,before_points)),
+                  'outside band unchanged',flush=True)
         diagnose_mesh(reference,points,triangles)
         base.location.x = .025
         moved = capture(obj)[0]
@@ -94,6 +115,9 @@ for inside in (False,True):
         base.location.x = 0
         restored = capture(obj)[0]
         assert max((p-q).length for p,q in zip(points,restored)) < 1e-6
+        if contact_modifier:
+            obj.modifiers.remove(contact_modifier)
+            bpy.data.node_groups.remove(contact_group)
     assert [tuple(v.co) for v in mesh.vertices] == original_a
     assert [tuple(v.co) for v in base.data.vertices] == original_b
     print('PASS finite / connectivity / live motion / restoration / original meshes preserved',flush=True)
