@@ -86,12 +86,17 @@ for location,power in (((-3,-4,5),900),((3,1,4),700)):
     aim(light)
 output = root/'artifacts'/'normal-continuity'
 output.mkdir(parents=True,exist_ok=True)
-modes = ('off','gn-source','gn','gn-bounded') if hasattr(bpy.types,'GeometryNodeSetMeshNormal') else ('off','transfer')
+modes = ('off','gn-source','gn','gn-bounded','gn-shared','gn-shared-fast','gn-shared-cached','transfer-replace') if hasattr(bpy.types,'GeometryNodeSetMeshNormal') else ('off','transfer','transfer-replace')
 for mode in modes:
     modifiers,groups,vg = [],[],None
     if mode != 'off':
         modifiers,groups,vg = add_normal_probe(obj,base,builder,mode=mode)
     points,topology,normals,loops,geometric = capture()
+    if mode in ('gn-shared','gn-shared-fast','gn-shared-cached'):
+        counts = {}
+        for vertex in loops:
+            counts[vertex] = counts.get(vertex,0)+1
+        assert max(counts.values())<=64
     assert topology==reference[1]
     assert max((p-q).length for p,q in zip(points,reference[0])) < 1e-7
     contact = [math.degrees(math.acos(max(-1,min(1,n.z))))
@@ -100,7 +105,7 @@ for mode in modes:
     outside = [(n-q).length for v,n,q in zip(loops,normals,reference[2]) if points[v].z>.2]
     assert opposed==0
     assert max(outside) < 2e-3
-    if mode in ('gn','gn-bounded'):
+    if mode in ('gn','gn-bounded','gn-shared','gn-shared-fast','gn-shared-cached','transfer-replace'):
         assert max(contact)<.1
     print('NORMAL CONTINUITY',mode,'max seam angle to B',max(contact),
           'opposed corner normals',opposed,'positions/topology unchanged',flush=True)

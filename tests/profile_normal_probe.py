@@ -4,7 +4,7 @@
 def add_normal_probe(obj, base, builder, *, mode):
     import bpy
     radius = 0.15
-    if mode == 'transfer':
+    if mode in ('transfer','transfer-replace'):
         name = 'Probe Live Normal Mask'
         group = obj.vertex_groups.new(name=name)
         group.add(list(range(len(obj.data.vertices))), 1.0, 'REPLACE')
@@ -20,17 +20,19 @@ def add_normal_probe(obj, base, builder, *, mode):
         transfer.use_loop_data = True
         transfer.data_types_loops = {'CUSTOM_NORMAL'}
         transfer.loop_mapping = 'POLYINTERP_NEAREST'
-        transfer.mix_mode = 'MIX'
+        print('TRANSFER default mix mode',transfer.mix_mode,flush=True)
+        transfer.mix_mode = 'REPLACE' if mode=='transfer-replace' else 'MIX'
         transfer.mix_factor = 1.0
         transfer.vertex_group = group.name
         return [proximity, transfer], [], group
-    if mode not in ('gn','gn-safe','gn-facing','gn-source','gn-bounded') or not hasattr(bpy.types, 'GeometryNodeSetMeshNormal'):
+    if mode not in ('gn','gn-safe','gn-facing','gn-source','gn-bounded','gn-shared','gn-shared-fast','gn-shared-cached') or not hasattr(bpy.types, 'GeometryNodeSetMeshNormal'):
         raise ValueError('GN custom normals unavailable; use transfer on Blender 4.2')
     group = bpy.data.node_groups.new('Final contact normals', 'GeometryNodeTree')
     group.interface.new_socket(name='Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
     group.interface.new_socket(name='Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
     nodes, links = group.nodes, group.links
     gin, gout = nodes.new('NodeGroupInput'), nodes.new('NodeGroupOutput')
+    source_geometry = gin.outputs['Geometry']
     info = nodes.new('GeometryNodeObjectInfo')
     info.transform_space = 'RELATIVE'
     info.inputs['Object'].default_value = base
@@ -62,7 +64,7 @@ def add_normal_probe(obj, base, builder, *, mode):
                    m(nodes, links, 'SUBTRACT', 3.0, m(nodes, links, 'MULTIPLY', facing, 2.0)))
         weight = m(nodes, links, 'MULTIPLY', weight, facing)
         smooth = m(nodes, links, 'SUBTRACT', 1.0, weight)
-    if mode in ('gn-safe','gn-bounded'):
+    if mode in ('gn-safe','gn-bounded','gn-shared','gn-shared-fast','gn-shared-cached'):
         face = nodes.new('GeometryNodeFaceOfCorner')
         links.new(nodes.new('GeometryNodeInputIndex').outputs[0],face.inputs['Corner Index'])
         geometric = nodes.new('GeometryNodeSampleIndex')
@@ -85,6 +87,43 @@ def add_normal_probe(obj, base, builder, *, mode):
             limit = m(nodes,links,'DIVIDE',a,m(nodes,links,'MAXIMUM',m(nodes,links,'ADD',a,negative_b),1e-6))
             limit = m(nodes,links,'MULTIPLY',limit,m(nodes,links,'SUBTRACT',1.0,
                        m(nodes,links,'MULTIPLY',negative_b,0.02)))
+            if mode in ('gn-shared','gn-shared-fast','gn-shared-cached'):
+                # All corners at a vertex use the most conservative bound.
+                # Keep their own shading normals (including sharp splits).
+                # Diagnostic fixtures assert valence <=64; this is not yet a
+                # general production solution for arbitrary mesh valence.
+                vertex = nodes.new('GeometryNodeVertexOfCorner')
+                links.new(nodes.new('GeometryNodeInputIndex').outputs[0],vertex.inputs['Corner Index'])
+                if mode=='gn-shared-cached':
+                    stored = nodes.new('GeometryNodeStoreNamedAttribute')
+                    stored.data_type,stored.domain = 'FLOAT','CORNER'
+                    stored.inputs['Name'].default_value = 'probe_corner_normal_limit'
+                    links.new(source_geometry,stored.inputs['Geometry'])
+                    links.new(limit,stored.inputs['Value'])
+                    source_geometry = stored.outputs['Geometry']
+                    cached = nodes.new('GeometryNodeInputNamedAttribute')
+                    cached.data_type = 'FLOAT'
+                    cached.inputs['Name'].default_value = 'probe_corner_normal_limit'
+                    limit = cached.outputs['Attribute']
+                shared_limit = None
+                for rank in range(64):
+                    around = nodes.new('GeometryNodeCornersOfVertex')
+                    links.new(vertex.outputs['Vertex Index'],around.inputs['Vertex Index'])
+                    around.inputs['Sort Index'].default_value = rank
+                    sampled = nodes.new('GeometryNodeSampleIndex')
+                    sampled.data_type,sampled.domain = 'FLOAT','CORNER'
+                    links.new(source_geometry,sampled.inputs['Geometry'])
+                    links.new(limit,sampled.inputs['Value'])
+                    links.new(around.outputs['Corner Index'],sampled.inputs['Index'])
+                    exists = m(nodes,links,'LESS_THAN',float(rank),around.outputs['Total'])
+                    item = builder._switch(nodes,links,'FLOAT',exists,1.0,sampled.outputs['Value'])
+                    shared_limit = item if shared_limit is None else m(nodes,links,'MINIMUM',shared_limit,item)
+                    if rank==7:
+                        small_limit = shared_limit
+                if mode in ('gn-shared-fast','gn-shared-cached'):
+                    shared_limit = builder._switch(nodes,links,'FLOAT',
+                         m(nodes,links,'GREATER_THAN',around.outputs['Total'],8.0),small_limit,shared_limit)
+                limit = shared_limit
             weight = m(nodes,links,'MINIMUM',weight,limit)
             smooth = m(nodes,links,'SUBTRACT',1.0,weight)
     normal = v(nodes, links, 'NORMALIZE', v(nodes, links, 'ADD',
@@ -92,7 +131,7 @@ def add_normal_probe(obj, base, builder, *, mode):
                 v(nodes, links, 'SCALE', target_normal, scale=weight)))
     set_normal = nodes.new('GeometryNodeSetMeshNormal')
     set_normal.mode, set_normal.domain = 'FREE', 'CORNER'
-    links.new(gin.outputs['Geometry'], set_normal.inputs['Mesh'])
+    links.new(source_geometry, set_normal.inputs['Mesh'])
     links.new(normal, set_normal.inputs['Custom Normal'])
     links.new(set_normal.outputs['Mesh'], gout.inputs['Geometry'])
     modifier = obj.modifiers.new('Final Contact Normals', 'NODES')

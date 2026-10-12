@@ -125,6 +125,11 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
         before_points, before_topology, _, before_normals, loop_vertices, geometric_normals = capture(include_normals=True)
         normal_modifiers, normal_groups, normal_vertex_group = add_normal_probe(obj,base,builder,mode=normal_mode)
         points, topology, distances, after_normals, _, _ = capture(include_normals=True)
+        if normal_mode in ('gn-shared','gn-shared-fast','gn-shared-cached'):
+            counts = {}
+            for vertex in loop_vertices:
+                counts[vertex] = counts.get(vertex,0)+1
+            assert max(counts.values()) <= 64, 'Shared-bound diagnostic valence limit exceeded'
         assert topology == before_topology and all((p-q).length < 1e-7 for p,q in zip(points,before_points))
         changed = max((p-q).length for p,q in zip(before_normals,after_normals))
         if normal_mode == 'gn-facing':
@@ -157,8 +162,23 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
         print('CONTACT GEOMETRY exposed corners',len(exposed),
               'downward geometric corners',sum(g.z < -1e-5 for g in exposed),
               'minimum geometric normal z',min((g.z for g in exposed),default=None),flush=True)
-        if normal_mode in ('gn-safe','gn-bounded'):
+        if normal_mode in ('gn-safe','gn-bounded','gn-shared','gn-shared-fast','gn-shared-cached'):
             assert opposed == 0, 'Exposed shading normals oppose the geometric surface'
+        smooth_pairs = []
+        incident = {}
+        for corner,vertex in enumerate(loop_vertices):
+            if 1e-5<points[vertex].z<.15:
+                incident.setdefault(vertex,[]).append(corner)
+        for corners in incident.values():
+            for i,a in enumerate(corners):
+                for b in corners[i+1:]:
+                    if (before_normals[a]-before_normals[b]).length < 1e-4:
+                        smooth_pairs.append((after_normals[a]-after_normals[b]).length)
+        print('CORNER CONTINUITY originally smooth pairs',len(smooth_pairs),
+              'max introduced normal difference',max(smooth_pairs,default=0),
+              'pairs above 0.01',sum(delta>.01 for delta in smooth_pairs),flush=True)
+        if normal_mode in ('gn-shared','gn-shared-fast','gn-shared-cached'):
+            assert max(smooth_pairs,default=0)<1e-4, 'Shared bound split originally smooth corner normals'
         print('NORMALS',normal_mode,'max change',changed,'median contact angle',statistics.median(inside_angles) if inside_angles else None,
               'upper contact samples',len(upper_contact_angles),
               'upper contact angle median/max',
@@ -269,6 +289,7 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
         artifact += ('-'+underface_mode) if underface_mode else ''
         artifact += '-eevee' if '--eevee' in sys.argv else ''
         artifact += '-no-shadow' if '--no-shadow' in sys.argv else ''
+        artifact += ('-levels-'+str(levels)) if levels!=2 else ''
         scene.render.filepath = str(output/(artifact+'.png'))
         bpy.ops.wm.save_as_mainfile(filepath=str(output/(artifact+'.blend')))
         bpy.ops.render.render(write_still=True)
