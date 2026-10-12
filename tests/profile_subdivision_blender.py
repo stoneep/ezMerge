@@ -134,11 +134,15 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
         else:
             assert changed > 0.01, 'Normal probe had no shading effect'
         inside_angles, outside_deltas = [], []
-        for vertex,p,q in zip(loop_vertices,before_normals,after_normals):
+        upper_contact_angles = []
+        for vertex,p,q,g in zip(loop_vertices,before_normals,after_normals,geometric_normals):
             # Buried vertices are not points on the target surface. Do not
             # require them to have the exact target normal merely because z<0.
             if abs(points[vertex].z) < 1e-6:
                 inside_angles.append(math.degrees(math.acos(max(-1,min(1,q.z)))))
+                # Measurement only: do not disable deformation on either side.
+                if g.z > 0.01:
+                    upper_contact_angles.append(inside_angles[-1])
             if points[vertex].z > 0.2:
                 outside_deltas.append((p-q).length)
         assert max(outside_deltas) < 2e-3, 'Normals outside support changed'
@@ -156,6 +160,9 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
         if normal_mode == 'gn-safe':
             assert opposed == 0, 'Exposed shading normals oppose the geometric surface'
         print('NORMALS',normal_mode,'max change',changed,'median contact angle',statistics.median(inside_angles) if inside_angles else None,
+              'upper contact samples',len(upper_contact_angles),
+              'upper contact angle median/max',
+              (statistics.median(upper_contact_angles),max(upper_contact_angles)) if upper_contact_angles else None,
               'exposed hemisphere mismatches',opposed,
               'contact normals aligned fraction',sum(a<1 for a in inside_angles)/len(inside_angles) if inside_angles else None,
               'outside delta',max(outside_deltas),'positions/topology unchanged',flush=True)

@@ -24,7 +24,7 @@ def add_normal_probe(obj, base, builder, *, mode):
         transfer.mix_factor = 1.0
         transfer.vertex_group = group.name
         return [proximity, transfer], [], group
-    if mode not in ('gn','gn-safe','gn-facing') or not hasattr(bpy.types, 'GeometryNodeSetMeshNormal'):
+    if mode not in ('gn','gn-safe','gn-facing','gn-source') or not hasattr(bpy.types, 'GeometryNodeSetMeshNormal'):
         raise ValueError('GN custom normals unavailable; use transfer on Blender 4.2')
     group = bpy.data.node_groups.new('Final contact normals', 'GeometryNodeTree')
     group.interface.new_socket(name='Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
@@ -41,7 +41,13 @@ def add_normal_probe(obj, base, builder, *, mode):
     sample = builder._surface_normal_sampler(nodes, links, shaded)
     links.new(near.outputs['Position'], sample.inputs['Sample Position'])
     m, v = builder._math, builder._vector
-    u = m(nodes, links, 'DIVIDE', near.outputs['Distance'], radius, clamp=True)
+    mask_distance = near.outputs['Distance']
+    if mode == 'gn-source':
+        source = nodes.new('GeometryNodeInputNamedAttribute')
+        source.data_type = 'FLOAT'
+        source.inputs['Name'].default_value = builder.ADHESION_DISTANCE
+        mask_distance = source.outputs['Attribute']
+    u = m(nodes, links, 'DIVIDE', mask_distance, radius, clamp=True)
     smooth = m(nodes, links, 'MULTIPLY', m(nodes, links, 'MULTIPLY', u, u),
                m(nodes, links, 'SUBTRACT', 3.0, m(nodes, links, 'MULTIPLY', u, 2.0)))
     weight = m(nodes, links, 'SUBTRACT', 1.0, smooth)
