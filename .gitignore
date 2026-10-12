@@ -218,3 +218,29 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-coherent4-no-boolean.blend
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-coherent4-no-boolean.png
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-coherent8-no-boolean.blend
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-coherent8-no-boolean.png
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-limit-order-no-boolean.blend
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-limit-order-no-boolean.png
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-nearest-landing-no-boolean.blend
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-nearest-landing-no-boolean.png
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-no-rotation-no-boolean.blend
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-no-rotation-no-boolean.png
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-signed-no-boolean.blend
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-signed-no-boolean.png
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-smooth-target-no-boolean.blend
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-smooth-target-no-boolean.png
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-tangent-damped-no-boolean.blend
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-tangent-damped-no-boolean.png
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-transport-soft-no-boolean.blend
+/artifacts/bead-preview/adhesion-corner-probe-relax-off-transport-soft-no-boolean.png
+/artifacts/bead-preview/adhesion-spread-probe-relax-off-signed-no-boolean.blend
+/artifacts/bead-preview/adhesion-spread-probe-relax-off-signed-no-boolean.png
+/artifacts/profile-plane/sharp.blend
+/artifacts/profile-plane/sharp.png
+/artifacts/profile-plane/smooth.blend
+/artifacts/profile-plane/smooth.png
+/artifacts/profile-plane/smooth-tangent.blend
+/artifacts/profile-plane/smooth-tangent.png

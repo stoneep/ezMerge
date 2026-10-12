@@ -14,6 +14,8 @@ sys.modules[package.__name__] = package
 merges = importlib.import_module('ezhs_preview.merges')
 label = sys.argv[sys.argv.index('--') + 1] if '--' in sys.argv else 'after'
 no_boolean = '--no-boolean' in sys.argv
+signed_probe = '--signed-probe' in sys.argv
+probe_mode = sys.argv[sys.argv.index('--probe-mode') + 1] if '--probe-mode' in sys.argv else 'signed'
 output = root / 'artifacts' / 'bead-preview'
 output.mkdir(parents=True, exist_ok=True)
 bpy.ops.object.select_all(action='SELECT')
@@ -48,6 +50,13 @@ else:
     base = cylinder(0.85, 6, (0, 0.62, 0), (0.25, 0, 0))
     obj = cylinder(1, 5, (0, 0, 0), (0, 0, 0))
 bead = merges.add_merge(obj, base, method=merges.BEAD, adhesion=label.startswith('adhesion'))
+if signed_probe:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from boolean_free_probe import build_signed_probe
+    builder = importlib.import_module('ezhs_preview.merge_adhesion')
+    group = bpy.data.node_groups.new('Signed adhesion diagnostic', 'GeometryNodeTree')
+    build_signed_probe(builder, group, mode=probe_mode)
+    bead.node_group = group
 if label.startswith('adhesion'):
     merges.cn.set_input(bead, merges.INFLUENCE_RADIUS, 0.55)
     merges.cn.set_input(bead, merges.MERGE_RADIUS, 0.3)
@@ -121,7 +130,7 @@ for pos, power, size in (((-4, -5, 7), 1600, 5), ((4, -2, 2), 800, 4), ((1, 4, 5
     light.data.shape = 'DISK'
     light.data.size = size
     aim(light, (0, 0, 0))
-artifact_label = label + ('-no-boolean' if no_boolean else '')
+artifact_label = label + (('-' + probe_mode) if signed_probe else '') + ('-no-boolean' if no_boolean else '')
 scene.render.filepath = str(output / (artifact_label + '.png'))
 bpy.ops.wm.save_as_mainfile(filepath=str(output / (artifact_label + '.blend')))
 bpy.ops.render.render(write_still=True)

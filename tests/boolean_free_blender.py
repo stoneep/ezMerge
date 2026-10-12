@@ -10,7 +10,7 @@ import types
 import bpy
 from mathutils.bvhtree import BVHTree
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from boolean_free_probe import bypass_adhesion_boolean
+from boolean_free_probe import bypass_adhesion_boolean, build_signed_probe
 
 root = Path(__file__).resolve().parents[1]
 package = types.ModuleType('boolean_free_test')
@@ -73,6 +73,17 @@ for corner in (False, True):
     original_a = [tuple(v.co) for v in obj.data.vertices]
     original_b = [tuple(v.co) for v in base.data.vertices]
     bypass_adhesion_boolean(mod)
+    cn.set_input(mod, merges.SURFACE_RELAX, 0)
+    unsigned = snapshot(obj)
+    if '--signed-probe' in sys.argv:
+        settings = {item.name: cn.get_input(mod, item.name) for item in mod.node_group.interface.items_tree
+                    if item.item_type == 'SOCKET' and item.in_out == 'INPUT' and item.name != 'Geometry'}
+        group = bpy.data.node_groups.new('Signed distance diagnostic', 'GeometryNodeTree')
+        build_signed_probe(importlib.import_module('boolean_free_test.merge_adhesion'), group)
+        mod.node_group = group
+        for name, value in settings.items():
+            cn.set_input(mod, name, value)
+        bypass_adhesion_boolean(mod)
     assert not any(n.bl_idname == 'GeometryNodeMeshBoolean' for n in mod.node_group.nodes)
     for level in (0, 2, 3):
         cn.set_input(mod, merges.ADHESION_LEVELS, level)
@@ -104,6 +115,16 @@ for corner in (False, True):
     assert [tuple(v.co) for v in base.data.vertices] == original_b
     relative = obj.matrix_world.inverted() @ base.matrix_world
     bvh = BVHTree.FromPolygons([relative @ v.co for v in base.data.vertices], [list(p.vertices) for p in base.data.polygons])
+    def leakage(data):
+        leaked = hidden = 0
+        for p, source in zip(data[0], data[2][merges.ADHESION_SOURCE_POSITION]):
+            q, n, _, _ = bvh.find_nearest(source)
+            if (source-q).dot(n) < -0.02:
+                hidden += 1
+                q, n, _, _ = bvh.find_nearest(p)
+                leaked += (p-q).dot(n) > 0.001
+        return leaked, hidden
+    print('PROBE originally hidden points emerging:', 'unsigned', leakage(unsigned), 'current', leakage(reference))
     inside = 0
     for p in reference[0]:
         nearest, normal, _, _ = bvh.find_nearest(p)
