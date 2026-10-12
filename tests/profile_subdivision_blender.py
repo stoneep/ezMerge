@@ -17,6 +17,7 @@ from profile_contact_probe import add_contact_probe
 from profile_normal_probe import add_normal_probe
 from profile_underface_probe import add_underface_probe
 from profile_fold_probe import diagnose_profile
+from contact_section_probe import measure_section
 root = Path(__file__).resolve().parents[1]
 package = types.ModuleType('subdivision_profile')
 package.__path__ = [str(root)]
@@ -25,6 +26,8 @@ merges = importlib.import_module('subdivision_profile.merges')
 builder = importlib.import_module('subdivision_profile.merge_adhesion')
 cn = merges.cn
 output = root / 'artifacts' / 'profile-subdivision'
+if '--output-dir' in sys.argv:
+    output = (root / sys.argv[sys.argv.index('--output-dir')+1]).resolve()
 output.mkdir(parents=True, exist_ok=True)
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
@@ -192,6 +195,8 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
         if underface_mode == 'remove-cap':
             raise ValueError('Fold comparison requires identical face connectivity')
         diagnose_profile(reference, points, topology[1])
+    if '--section-probe' in sys.argv:
+        measure_section(reference,points,topology[1])
     assert distances is not None
     foot = [p for p,d in zip(points,distances) if d < 1e-6]
     exact_source_contact = bool(foot)
@@ -291,9 +296,56 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
         artifact += '-no-shadow' if '--no-shadow' in sys.argv else ''
         artifact += ('-levels-'+str(levels)) if levels!=2 else ''
         scene.render.filepath = str(output/(artifact+'.png'))
-        bpy.ops.wm.save_as_mainfile(filepath=str(output/(artifact+'.blend')))
-        bpy.ops.render.render(write_still=True)
-        print('PREVIEW',scene.render.filepath,flush=True)
+        if '--paired-shadows' in sys.argv:
+            if '--eevee' in sys.argv or '--paired-normals' in sys.argv or '--no-shadow' in sys.argv:
+                raise ValueError('Shadow pair requires Cycles, fixed normals and no other shadow switch')
+            scene.cycles.seed = 42
+            scene.cycles.samples = 64
+            shadow_reference = capture(include_normals=True)
+            for enabled in (True,False):
+                obj.visible_shadow = enabled
+                p,t,_,n,_,_ = capture(include_normals=True)
+                assert t==shadow_reference[1]
+                delta = max((a-b).length for a,b in zip(p,shadow_reference[0]))
+                normal_delta = max((a-b).length for a,b in zip(n,shadow_reference[3]))
+                assert delta<1e-7 and normal_delta<1e-7
+                tag = 'on' if enabled else 'off'
+                name = artifact+'-shadow-'+tag
+                scene.render.filepath = str(output/(name+'.png'))
+                bpy.ops.wm.save_as_mainfile(filepath=str(output/(name+'.blend')))
+                bpy.ops.render.render(write_still=True)
+                print('SHADOW PAIR',tag,'coordinate delta',delta,'normal delta',normal_delta,
+                      'A shadow-ray visibility only; diffuse/glossy rays unchanged',
+                      'PREVIEW',scene.render.filepath,flush=True)
+        elif '--paired-normals' in sys.argv:
+            if not normal_modifiers or '--eevee' in sys.argv:
+                raise ValueError('Paired normals needs a normal probe and Cycles')
+            scene.cycles.seed = 42
+            scene.cycles.samples = 64
+            paired_points,paired_topology = points,topology
+            pair_normals = {}
+            for enabled in (False,True):
+                for modifier in normal_modifiers:
+                    modifier.show_viewport = modifier.show_render = enabled
+                p,t,_,n,_,_ = capture(include_normals=True)
+                assert t==paired_topology
+                delta = max((a-b).length for a,b in zip(p,paired_points))
+                assert delta<1e-7
+                tag = 'on' if enabled else 'off'
+                pair_normals[tag] = n
+                name = artifact+'-pair-'+tag
+                scene.render.filepath = str(output/(name+'.png'))
+                bpy.ops.wm.save_as_mainfile(filepath=str(output/(name+'.blend')))
+                bpy.ops.render.render(write_still=True)
+                print('PAIRED NORMALS',tag,'maximum coordinate difference',delta,
+                      'vertices',len(p),'faces',len(t[1]),'seed',scene.cycles.seed,
+                      'PREVIEW',scene.render.filepath,flush=True)
+            print('PAIRED normal difference',max((a-b).length for a,b in zip(pair_normals['off'],pair_normals['on'])),
+                  'only normal modifier visibility changed',flush=True)
+        else:
+            bpy.ops.wm.save_as_mainfile(filepath=str(output/(artifact+'.blend')))
+            bpy.ops.render.render(write_still=True)
+            print('PREVIEW',scene.render.filepath,flush=True)
     for normal_modifier in reversed(normal_modifiers):
         obj.modifiers.remove(normal_modifier)
     for normal_group in normal_groups:
