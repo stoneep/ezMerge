@@ -11,7 +11,7 @@ root = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(root/'tests'))
 from boolean_free_probe import bypass_adhesion_boolean
 from profile_tangent_probe import build_tangent_profile
-from profile_fold_probe import diagnose_mesh,strict_mesh_crossings
+from profile_fold_probe import diagnose_mesh,strict_mesh_crossings,verify_extended_classifier
 package = types.ModuleType('curved_fold_test')
 package.__path__ = [str(root)]
 sys.modules[package.__name__] = package
@@ -24,6 +24,7 @@ synthetic = [Vector(p) for p in ((-1,-1,0),(1,-1,0),(0,1,0),
                                 (0,-.5,-1),(0,-.5,1),(.5,.5,0))]
 assert strict_mesh_crossings(synthetic,[(0,1,2),(3,4,5)])[0]
 assert not strict_mesh_crossings(synthetic,[(0,1,2)])[0]
+verify_extended_classifier()
 
 def capture(obj):
     obj.update_tag()

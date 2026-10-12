@@ -43,6 +43,119 @@ def strict_mesh_crossings(points,triangles):
     return hits,candidates
 
 
+def _coplanar_overlap_area(a,b,length_tolerance):
+    """Clip projected triangles; shared edges/vertices have zero area."""
+    normal = (a[1]-a[0]).cross(a[2]-a[0])
+    other = (b[1]-b[0]).cross(b[2]-b[0])
+    if normal.length < length_tolerance**2 or other.length < length_tolerance**2:
+        return 0.0
+    unit = normal.normalized()
+    if abs(unit.dot(other.normalized())) < 1-1e-6:
+        return 0.0
+    if max(abs((p-a[0]).dot(unit)) for p in b) > length_tolerance:
+        return 0.0
+    axis = max(range(3),key=lambda k:abs(unit[k]))
+    coords = [k for k in range(3) if k != axis]
+    polygon = [tuple(p[k] for k in coords) for p in a]
+    clip = [tuple(p[k] for k in coords) for p in b]
+    sign = 1 if _cross(*clip) >= 0 else -1
+    for i in range(3):
+        if not polygon:
+            return 0.0
+        u,v = clip[i],clip[(i+1)%3]
+        result = []
+        previous = polygon[-1]
+        dp = sign*_cross(u,v,previous)
+        for current in polygon:
+            dc = sign*_cross(u,v,current)
+            if (dc >= 0) != (dp >= 0):
+                t = dp/(dp-dc)
+                result.append(tuple(previous[k]+t*(current[k]-previous[k]) for k in range(2)))
+            if dc >= 0:
+                result.append(current)
+            previous,dp = current,dc
+        polygon = result
+    area = abs(sum(p[0]*q[1]-p[1]*q[0]
+                   for p,q in zip(polygon,polygon[1:]+polygon[:1])))*0.5
+    return area/abs(unit[axis])
+
+
+def extended_mesh_overlaps(points,triangles):
+    """Positive-area coplanar overlaps and adjacent transverse crossings.
+
+    Normal hinges, shared edges and vertex-only touches are not errors.
+    Near-degenerate triangles are measured separately by diagnose_mesh.
+    """
+    from mathutils.bvhtree import BVHTree
+    scale = max((max(p[k] for p in points)-min(p[k] for p in points)
+                 for k in range(3)),default=1.0)
+    tolerance = max(scale*1e-7,1e-8)
+    tree = BVHTree.FromPolygons(points,triangles,all_triangles=True,epsilon=tolerance)
+    coplanar,adjacent = [],[]
+    # Blender BVH can omit shared-vertex pairs. Enumerate those explicitly,
+    # otherwise even an intentionally folded shared-edge pair is invisible.
+    pairs = {tuple(sorted(pair)) for pair in tree.overlap(tree) if pair[0]!=pair[1]}
+    incident = {}
+    for i,triangle in enumerate(triangles):
+        for vertex in triangle:
+            incident.setdefault(vertex,[]).append(i)
+    for items in incident.values():
+        pairs.update((items[i],items[j]) for i in range(len(items)) for j in range(i+1,len(items)))
+    # Coplanar pairs can also be absent from BVH overlap. An independent
+    # bounding-box sweep supplies candidates, followed by area clipping.
+    boxes = [(tuple(min(points[v][k] for v in triangle) for k in range(3)),
+              tuple(max(points[v][k] for v in triangle) for k in range(3)),i)
+             for i,triangle in enumerate(triangles)]
+    active = []
+    for low,high,i in sorted(boxes,key=lambda item:item[0][0]):
+        active = [(a,b,j) for a,b,j in active if b[0] >= low[0]-tolerance]
+        for a,b,j in active:
+            if all(b[k] >= low[k]-tolerance and high[k] >= a[k]-tolerance for k in (1,2)):
+                pairs.add(tuple(sorted((i,j))))
+        active.append((low,high,i))
+    for i,j in sorted(pairs):
+        if i >= j:
+            continue
+        shared = set(triangles[i]).intersection(triangles[j])
+        a,b = [points[k] for k in triangles[i]],[points[k] for k in triangles[j]]
+        area = _coplanar_overlap_area(a,b,tolerance)
+        area_a = (a[1]-a[0]).cross(a[2]-a[0]).length*.5
+        area_b = (b[1]-b[0]).cross(b[2]-b[0]).length*.5
+        if area > max(tolerance**2*16,min(area_a,area_b)*1e-8):
+            coplanar.append((i,j,len(shared),area))
+        elif len(shared)==1:
+            # For a shared-vertex pair, only the opposite edges can pierce
+            # away from that vertex. Testing incident edges magnifies float32
+            # endpoint roundoff into false positives. Two noncoplanar triangles
+            # sharing an edge intersect only on that edge, by construction.
+            opposite_a = [points[k] for k in triangles[i] if k not in shared]
+            opposite_b = [points[k] for k in triangles[j] if k not in shared]
+            if (_pierces(*opposite_a,b,eps=1e-5) or _pierces(*opposite_b,a,eps=1e-5)):
+                adjacent.append((i,j))
+    return coplanar,adjacent
+
+
+def verify_extended_classifier():
+    from mathutils import Vector
+    def run(coords,triangles):
+        return extended_mesh_overlaps([Vector(p) for p in coords],triangles)
+    # Legal shared edge and a vertex-only touch.
+    assert run([(0,0,0),(1,0,0),(0,1,0),(1,-1,0)],[(0,1,2),(1,0,3)]) == ([],[])
+    assert run([(0,0,0),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)],[(0,1,2),(0,3,4)]) == ([],[])
+    # Shared-edge fold onto the same side: positive-area overlap.
+    c,a = run([(0,0,0),(1,0,0),(0,1,0),(.2,.5,0)],[(0,1,2),(1,0,3)])
+    assert len(c)==1 and c[0][2]==2 and not a
+    # Disconnected coplanar overlap, even with opposite winding.
+    c,a = run([(0,0,0),(1,0,0),(0,1,0),(.1,.1,0),(.1,.6,0),(.6,.1,0)],[(0,1,2),(3,4,5)])
+    assert len(c)==1 and c[0][2]==0 and not a
+    # Ordinary noncoplanar hinge is legal.
+    assert run([(0,0,0),(1,0,0),(0,1,0),(0,0,1)],[(0,1,2),(1,0,3)]) == ([],[])
+    # Shared-vertex pair also crosses away from the shared vertex.
+    c,a = run([(-1,-1,0),(1,-1,0),(0,1,0),(0,.2,-1),(0,.2,1)],[(0,1,2),(0,3,4)])
+    assert not c and a == [(0,1)]
+    print('PASS extended classifier: legal edges/touches/hinges and injected overlaps/fold',flush=True)
+
+
 def diagnose_mesh(reference,points,triangles):
     ratios = []
     rotated = 0
@@ -55,11 +168,20 @@ def diagnose_mesh(reference,points,triangles):
     hits,candidates = strict_mesh_crossings(points,triangles)
     baseline,_ = strict_mesh_crossings(reference,triangles)
     introduced = set(hits)-set(baseline)
+    coplanar,adjacent = extended_mesh_overlaps(points,triangles)
+    old_coplanar,old_adjacent = extended_mesh_overlaps(reference,triangles)
+    new_coplanar = {(i,j) for i,j,_,_ in coplanar}-{(i,j) for i,j,_,_ in old_coplanar}
+    new_adjacent = set(adjacent)-set(old_adjacent)
     report = dict(collapsed=sum(r < 1e-4 for r in ratios),
                   rotated=rotated,minimum_area_ratio=min(ratios,default=None),
                   strict_crossings=len(hits),baseline_crossings=len(baseline),
-                  new_crossings=len(introduced),broad_phase_candidates=candidates)
+                  new_crossings=len(introduced),broad_phase_candidates=candidates,
+                  coplanar_overlaps=len(coplanar),adjacent_coplanar_overlaps=sum(s>0 for _,_,s,_ in coplanar),
+                  baseline_coplanar_overlaps=len(old_coplanar),new_coplanar_overlaps=len(new_coplanar),
+                  adjacent_crossings=len(adjacent),baseline_adjacent_crossings=len(old_adjacent),
+                  new_adjacent_crossings=len(new_adjacent))
     print('MESH FOLD PROBE',report,'new pairs',sorted(introduced)[:8],flush=True)
+    print('OVERLAP DETAILS coplanar',coplanar[:8],'adjacent crossings',adjacent[:8],flush=True)
     return report
 
 
@@ -89,6 +211,9 @@ def verify_classifier():
 
 def diagnose_profile(reference, points, faces):
     verify_classifier()
+    verify_extended_classifier()
+    diagnose_mesh(reference,points,[(face[0],face[k],face[k+1])
+                                  for face in faces for k in range(1,len(face)-1)])
     collapsed = rotated = triangles = 0
     ratios = []
     for face in faces:
