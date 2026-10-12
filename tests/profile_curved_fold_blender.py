@@ -100,12 +100,16 @@ for inside in (False,True):
         if '--contact-check' in sys.argv:
             measure_contact(obj,base,points,distances,label='before reattachment',faces=current_topology)
             before_points = points
-            contact_modifier,contact_group = add_contact_probe(obj,base,builder,mode='soft')
+            contact_mode = sys.argv[sys.argv.index('--contact-mode')+1] if '--contact-mode' in sys.argv else 'soft'
+            contact_modifier,contact_group = add_contact_probe(obj,base,builder,mode=contact_mode)
             points,triangles,corrected_topology,distances = capture(obj,with_distance=True)
             assert corrected_topology == current_topology
             outside = [(p-q).length for p,q,d in zip(points,before_points,distances) if d>=.25]
             assert max(outside,default=0) < 1e-7
-            measure_contact(obj,base,points,distances,label='after soft reattachment',faces=corrected_topology)
+            gaps = measure_contact(obj,base,points,distances,label='after '+contact_mode+' reattachment',faces=corrected_topology)
+            if contact_mode == 'anchored':
+                core = [g for g,d in zip(gaps,distances) if d<=.05]
+                assert core and max(core) < 2e-6, 'Contact core detached from target'
             print('CONTACT correction maximum movement',max((p-q).length for p,q in zip(points,before_points)),
                   'outside band unchanged',flush=True)
         diagnose_mesh(reference,points,triangles)

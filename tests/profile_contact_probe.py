@@ -1,10 +1,12 @@
 """Diagnostic post-subdivision reattachment; no snapshots or topology edits."""
 
 
-def add_contact_probe(obj, base, builder, *, mode):
+def add_contact_probe(obj, base, builder, *, mode, core_radius=0.05, support_radius=0.25):
     import bpy
-    if mode not in ('hard', 'soft'):
+    if mode not in ('hard', 'soft', 'anchored'):
         raise ValueError('Unknown contact probe')
+    if not 0 <= core_radius < support_radius:
+        raise ValueError('Contact core must be smaller than its transition support')
     group = bpy.data.node_groups.new('Contact reattachment '+mode, 'GeometryNodeTree')
     group.interface.new_socket(name='Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
     group.interface.new_socket(name='Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
@@ -22,7 +24,11 @@ def add_contact_probe(obj, base, builder, *, mode):
         weight = m(nodes, links, 'LESS_THAN', d, 1e-6)
     else:
         # Physical source-distance support, not a fixed number of topology rows.
-        u = m(nodes, links, 'DIVIDE', d, 0.25, clamp=True)
+        # Anchored has a fully projected core and a C1 transition to unchanged
+        # geometry. Soft remains the comparison with no finite-width core.
+        start = core_radius if mode == 'anchored' else 0.0
+        u = m(nodes, links, 'DIVIDE', m(nodes, links, 'SUBTRACT', d, start),
+              support_radius-start, clamp=True)
         smooth = m(nodes, links, 'MULTIPLY', m(nodes, links, 'MULTIPLY', u, u),
                    m(nodes, links, 'SUBTRACT', 3.0, m(nodes, links, 'MULTIPLY', u, 2.0)))
         weight = m(nodes, links, 'SUBTRACT', 1.0, smooth)
