@@ -10,7 +10,7 @@ import inspect
 import math
 
 
-def build_tangent_profile(builder, group):
+def build_tangent_profile(builder, group, *, direct_source_normals=False):
     original = builder._falloff_weight
     m, switch = builder._math, builder._switch
     def weight(nodes, links, gin, distance, influence):
@@ -23,5 +23,12 @@ def build_tangent_profile(builder, group):
                      m(nodes, links, 'SUBTRACT', 1.0, gin.outputs[builder.BEAD_CUSTOM_CURVE]))
         return switch(nodes, links, 'FLOAT', selected, existing, radial)
     namespace = dict(vars(builder), _falloff_weight=weight)
-    exec(compile(inspect.getsource(builder._build_adhesion), '<diagnostic tangent profile>', 'exec'), namespace)
+    source = inspect.getsource(builder._build_adhesion)
+    if direct_source_normals:
+        before = "    own_normal = _vector(nodes, links, 'NORMALIZE', own.outputs['Value'])"
+        if source.count(before) != 1:
+            raise ValueError('Source normal probe anchor changed.')
+        source = source.replace(before,
+            "    own_normal = _vector(nodes, links, 'NORMALIZE', nodes.new('GeometryNodeInputNormal').outputs[0])")
+    exec(compile(source, '<diagnostic tangent profile>', 'exec'), namespace)
     namespace['_build_adhesion'](group)
