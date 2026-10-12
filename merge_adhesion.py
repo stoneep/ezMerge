@@ -55,6 +55,42 @@ def _falloff_weight(nodes, links, gin, distance, influence):
     return weight
 
 
+def _pin_contact_core(nodes, links, geometry, gin, target, shaded, core, influence, gap):
+    """Stateless final fit: exact core, profile transition, untouched outside.
+
+    Run after refinement and relaxation so they cannot detach the core again.
+    Zero Contact Radius bypasses this stage and preserves legacy geometry.
+    """
+    attr = nodes.new('GeometryNodeInputNamedAttribute')
+    attr.data_type = 'FLOAT'
+    attr.inputs['Name'].default_value = ADHESION_DISTANCE
+    d = attr.outputs['Attribute']
+    region, _ = _deformation_region(nodes, links, d, influence)
+    transition = _falloff_weight(nodes, links, gin,
+                                _math(nodes, links, 'MAXIMUM', 0.0, _math(nodes, links, 'SUBTRACT', d, core)),
+                                _math(nodes, links, 'SUBTRACT', influence, core))
+    amount = _switch(nodes, links, 'FLOAT', _math(nodes, links, 'LESS_THAN', d,
+                     _math(nodes, links, 'ADD', core, 1e-7)), transition, 1.0)
+    amount = _math(nodes, links, 'MULTIPLY', amount, region)
+    position = nodes.new('GeometryNodeInputPosition').outputs[0]
+    near = nodes.new('GeometryNodeProximity')
+    near.target_element = 'FACES'
+    links.new(target, near.inputs['Target'])
+    links.new(position, near.inputs['Source Position'])
+    normal = _surface_normal_sampler(nodes, links, shaded)
+    links.new(near.outputs['Position'], normal.inputs['Sample Position'])
+    destination = _vector(nodes, links, 'ADD', near.outputs['Position'],
+                          _vector(nodes, links, 'SCALE',
+                                  _vector(nodes, links, 'NORMALIZE', normal.outputs['Value']), scale=gap))
+    move = nodes.new('GeometryNodeSetPosition')
+    links.new(geometry, move.inputs['Geometry'])
+    links.new(_math(nodes, links, 'GREATER_THAN', amount, 1e-8), move.inputs['Selection'])
+    links.new(_vector(nodes, links, 'SCALE', _vector(nodes, links, 'SUBTRACT', destination, position),
+                      scale=amount), move.inputs['Offset'])
+    return _switch(nodes, links, 'GEOMETRY', _math(nodes, links, 'GREATER_THAN', core, 1e-6),
+                   geometry, move.outputs['Geometry'])
+
+
 def _normal_pull(nodes, links, gin, distance, merge, weight):
     """Normal displacement amount, independent of tangential Push/Spread."""
     square = lambda value: _math(nodes, links, 'MULTIPLY', value, value)
@@ -532,9 +568,10 @@ def _build_adhesion(ng):
     ng.interface.new_socket(name='Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
     ng.interface.new_socket(name=BASE, in_out='INPUT', socket_type='NodeSocketObject')
     cn._new_input(ng, GLOBAL, 'NodeSocketFloat', 1.0, 0.0, 100.0,
-                  'Scales influence, merge, push, spread and clearance together; preserves their ratios')
+                  'Scales influence, contact, merge, push, spread and clearance together; preserves their ratios')
     for name, value, description in (
         (INFLUENCE_RADIUS, 0.16, 'Deformation may start where source distance to B is below this radius times Global Merge; A local units'),
+        (CONTACT_RADIUS, 0.0, 'Exact contact core from source distance; 0 preserves legacy fitting; capped at 95% of Influence Radius; clearance applies'),
         (MERGE_RADIUS, 0.08, 'Distance band reshaped toward B; not bead height'),
         (PUSH_STRENGTH, 0.08, 'Maximum outward travel along B; not normal displacement'),
         (SURFACE_SPREAD, 0.0, 'Extra travel along B near the contact; capped at Influence Radius for stability'),
@@ -567,6 +604,9 @@ def _build_adhesion(ng):
     links.new(gin.outputs[BASE], info.inputs['Object'])
     target = info.outputs['Geometry']
     influence = _math(nodes, links, 'MULTIPLY', gin.outputs[INFLUENCE_RADIUS], gin.outputs[GLOBAL])
+    core = _math(nodes, links, 'MINIMUM',
+                 _math(nodes, links, 'MULTIPLY', influence, 0.95),
+                 _math(nodes, links, 'MULTIPLY', gin.outputs[CONTACT_RADIUS], gin.outputs[GLOBAL]))
     merge = _math(nodes, links, 'MULTIPLY', gin.outputs[MERGE_RADIUS], gin.outputs[GLOBAL])
     push = _math(nodes, links, 'MULTIPLY', gin.outputs[PUSH_STRENGTH], gin.outputs[GLOBAL])
     spread = _math(nodes, links, 'MINIMUM', influence,
@@ -637,6 +677,9 @@ def _build_adhesion(ng):
                       _vector(nodes, links, 'SCALE', normal,
                               scale=_vector(nodes, links, 'DOT_PRODUCT', own_normal, normal))))
     region, region_distance = _deformation_region(nodes, links, distance, influence)
+    contact_region = _math(nodes, links, 'MULTIPLY', region,
+                          _math(nodes, links, 'MULTIPLY', _math(nodes, links, 'GREATER_THAN', core, 1e-6),
+                                _math(nodes, links, 'LESS_THAN', distance, _math(nodes, links, 'ADD', core, 1e-7))))
     weight = _falloff_weight(nodes, links, gin, distance, influence)
     # Profiles distribute strength only inside the independently defined band.
     weight = _math(nodes, links, 'MULTIPLY', weight, region)
@@ -696,6 +739,7 @@ def _build_adhesion(ng):
     geometry = source_position.outputs['Geometry']
     for name, value in ((ADHESION_WEIGHT, weight), (ADHESION_DISTANCE, distance),
                         (ADHESION_REGION, region), (ADHESION_REGION_DISTANCE, region_distance),
+                        (ADHESION_CONTACT_REGION, contact_region),
                         (ADHESION_SPREAD_PLANNED, spread_planned), (ADHESION_SPREAD_TAKEN, spread_taken)):
         store = nodes.new('GeometryNodeStoreNamedAttribute')
         store.data_type, store.domain = 'FLOAT', 'POINT'
@@ -733,6 +777,7 @@ def _build_adhesion(ng):
     result = _switch(nodes, links, 'GEOMETRY', before, repair.outputs['Geometry'], result)
     result = _relax_spread(nodes, links, result, target, shaded, gin.outputs[SURFACE_RELAX],
                            gin.outputs[SURFACE_RELAX_PASSES], influence, spreading, boundary_gap)
+    result = _pin_contact_core(nodes, links, result, gin, target, shaded, core, influence, boundary_gap)
     result = joins.smooth_by_angle(nodes, links, result, NORMAL_ANGLE)
     result = _match_contact_normals(nodes, links, result, gin, shaded, merge)
     valid = nodes.new('GeometryNodeAttributeDomainSize')
@@ -741,6 +786,7 @@ def _build_adhesion(ng):
     active = _math(nodes, links, 'MULTIPLY', _math(nodes, links, 'GREATER_THAN', influence, 1e-6),
                    _math(nodes, links, 'GREATER_THAN', valid.outputs['Face Count'], 0.0))
     effect = _math(nodes, links, 'GREATER_THAN',
-                   _math(nodes, links, 'ADD', merge, _math(nodes, links, 'ADD', push, spread)), 1e-6)
+                   _math(nodes, links, 'ADD', core,
+                         _math(nodes, links, 'ADD', merge, _math(nodes, links, 'ADD', push, spread))), 1e-6)
     active = _math(nodes, links, 'MULTIPLY', active, effect)
     links.new(_switch(nodes, links, 'GEOMETRY', active, gin.outputs['Geometry'], result), gout.inputs['Geometry'])

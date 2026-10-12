@@ -86,6 +86,8 @@ class VIEW3D_PT_ezhs(bpy.types.Panel):
                 box.label(text="Surface Adhesion")
                 for name in (merges.GLOBAL, merges.INFLUENCE_RADIUS, merges.MERGE_RADIUS, merges.PUSH_STRENGTH):
                     cn.draw_input(col, mod, name)
+                    if name == merges.INFLUENCE_RADIUS and mod.node_group.interface.items_tree.get(merges.CONTACT_RADIUS) is not None:
+                        cn.draw_input(col, mod, merges.CONTACT_RADIUS)
                 if mod.node_group.interface.items_tree.get(merges.SURFACE_SPREAD) is not None:
                     cn.draw_input(col, mod, merges.SURFACE_SPREAD)
                     gap = col.column(align=True)
