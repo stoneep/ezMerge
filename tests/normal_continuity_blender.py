@@ -86,7 +86,7 @@ for location,power in (((-3,-4,5),900),((3,1,4),700)):
     aim(light)
 output = root/'artifacts'/'normal-continuity'
 output.mkdir(parents=True,exist_ok=True)
-modes = ('off','gn-source','gn') if hasattr(bpy.types,'GeometryNodeSetMeshNormal') else ('off','transfer')
+modes = ('off','gn-source','gn','gn-bounded') if hasattr(bpy.types,'GeometryNodeSetMeshNormal') else ('off','transfer')
 for mode in modes:
     modifiers,groups,vg = [],[],None
     if mode != 'off':
@@ -100,7 +100,7 @@ for mode in modes:
     outside = [(n-q).length for v,n,q in zip(loops,normals,reference[2]) if points[v].z>.2]
     assert opposed==0
     assert max(outside) < 2e-3
-    if mode=='gn':
+    if mode in ('gn','gn-bounded'):
         assert max(contact)<.1
     print('NORMAL CONTINUITY',mode,'max seam angle to B',max(contact),
           'opposed corner normals',opposed,'positions/topology unchanged',flush=True)

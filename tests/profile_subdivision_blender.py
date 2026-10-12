@@ -157,7 +157,7 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
         print('CONTACT GEOMETRY exposed corners',len(exposed),
               'downward geometric corners',sum(g.z < -1e-5 for g in exposed),
               'minimum geometric normal z',min((g.z for g in exposed),default=None),flush=True)
-        if normal_mode == 'gn-safe':
+        if normal_mode in ('gn-safe','gn-bounded'):
             assert opposed == 0, 'Exposed shading normals oppose the geometric surface'
         print('NORMALS',normal_mode,'max change',changed,'median contact angle',statistics.median(inside_angles) if inside_angles else None,
               'upper contact samples',len(upper_contact_angles),

@@ -24,7 +24,7 @@ def add_normal_probe(obj, base, builder, *, mode):
         transfer.mix_factor = 1.0
         transfer.vertex_group = group.name
         return [proximity, transfer], [], group
-    if mode not in ('gn','gn-safe','gn-facing','gn-source') or not hasattr(bpy.types, 'GeometryNodeSetMeshNormal'):
+    if mode not in ('gn','gn-safe','gn-facing','gn-source','gn-bounded') or not hasattr(bpy.types, 'GeometryNodeSetMeshNormal'):
         raise ValueError('GN custom normals unavailable; use transfer on Blender 4.2')
     group = bpy.data.node_groups.new('Final contact normals', 'GeometryNodeTree')
     group.interface.new_socket(name='Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
@@ -62,7 +62,7 @@ def add_normal_probe(obj, base, builder, *, mode):
                    m(nodes, links, 'SUBTRACT', 3.0, m(nodes, links, 'MULTIPLY', facing, 2.0)))
         weight = m(nodes, links, 'MULTIPLY', weight, facing)
         smooth = m(nodes, links, 'SUBTRACT', 1.0, weight)
-    if mode == 'gn-safe':
+    if mode in ('gn-safe','gn-bounded'):
         face = nodes.new('GeometryNodeFaceOfCorner')
         links.new(nodes.new('GeometryNodeInputIndex').outputs[0],face.inputs['Corner Index'])
         geometric = nodes.new('GeometryNodeSampleIndex')
@@ -70,9 +70,23 @@ def add_normal_probe(obj, base, builder, *, mode):
         links.new(gin.outputs['Geometry'],geometric.inputs['Geometry'])
         links.new(nodes.new('GeometryNodeInputNormal').outputs[0],geometric.inputs['Value'])
         links.new(face.outputs['Face Index'],geometric.inputs['Index'])
-        reversed_normal = m(nodes,links,'LESS_THAN',v(nodes,links,'DOT_PRODUCT',geometric.outputs['Value'],target_normal),0.0)
-        sign = builder._switch(nodes,links,'FLOAT',reversed_normal,1.0,-1.0)
-        target_normal = v(nodes,links,'SCALE',target_normal,scale=sign)
+        if mode == 'gn-safe':
+            reversed_normal = m(nodes,links,'LESS_THAN',v(nodes,links,'DOT_PRODUCT',geometric.outputs['Value'],target_normal),0.0)
+            sign = builder._switch(nodes,links,'FLOAT',reversed_normal,1.0,-1.0)
+            target_normal = v(nodes,links,'SCALE',target_normal,scale=sign)
+        else:
+            # A*(1-w)+B*w must remain in the geometric normal's hemisphere.
+            # Bound w continuously using dot products; never flip B's normal.
+            # Compatible targets retain w=1. Opposing targets get a small
+            # safety margin to avoid an antiparallel zero-vector blend.
+            a = m(nodes,links,'MAXIMUM',v(nodes,links,'DOT_PRODUCT',geometric.outputs['Value'],own),0.0)
+            negative_b = m(nodes,links,'MAXIMUM',m(nodes,links,'MULTIPLY',
+                           v(nodes,links,'DOT_PRODUCT',geometric.outputs['Value'],target_normal),-1.0),0.0)
+            limit = m(nodes,links,'DIVIDE',a,m(nodes,links,'MAXIMUM',m(nodes,links,'ADD',a,negative_b),1e-6))
+            limit = m(nodes,links,'MULTIPLY',limit,m(nodes,links,'SUBTRACT',1.0,
+                       m(nodes,links,'MULTIPLY',negative_b,0.02)))
+            weight = m(nodes,links,'MINIMUM',weight,limit)
+            smooth = m(nodes,links,'SUBTRACT',1.0,weight)
     normal = v(nodes, links, 'NORMALIZE', v(nodes, links, 'ADD',
                 v(nodes, links, 'SCALE', own, scale=smooth),
                 v(nodes, links, 'SCALE', target_normal, scale=weight)))
