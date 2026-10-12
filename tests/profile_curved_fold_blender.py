@@ -14,6 +14,7 @@ from profile_tangent_probe import build_tangent_profile
 from profile_fold_probe import diagnose_mesh,strict_mesh_crossings,verify_extended_classifier
 from profile_contact_probe import add_contact_probe
 from profile_contact_measure import measure_contact
+from profile_orientation_probe import measure_orientation
 package = types.ModuleType('curved_fold_test')
 package.__path__ = [str(root)]
 sys.modules[package.__name__] = package
@@ -48,6 +49,8 @@ def capture(obj,with_distance=False):
 
 for inside in (False,True):
     if '--inner-only' in sys.argv and not inside:
+        continue
+    if '--outer-only' in sys.argv and inside:
         continue
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete(use_global=False)
@@ -97,6 +100,7 @@ for inside in (False,True):
         assert max((p-q).length for p,q in zip(points,reference)) > .01
         print('CASE','inner-wall' if inside else 'outer-surface','spread',spread,flush=True)
         contact_modifier = contact_group = None
+        before_points = points
         if '--contact-check' in sys.argv:
             measure_contact(obj,base,points,distances,label='before reattachment',faces=current_topology)
             before_points = points
@@ -112,6 +116,8 @@ for inside in (False,True):
                 assert core and max(core) < 2e-6, 'Contact core detached from target'
             print('CONTACT correction maximum movement',max((p-q).length for p,q in zip(points,before_points)),
                   'outside band unchanged',flush=True)
+        if '--orientation-check' in sys.argv:
+            measure_orientation(reference,before_points,points,current_topology,distances)
         diagnose_mesh(reference,points,triangles)
         base.location.x = .025
         moved = capture(obj)[0]
