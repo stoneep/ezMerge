@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from boolean_free_probe import bypass_adhesion_boolean
 from profile_tangent_probe import build_tangent_profile
 from profile_contact_probe import add_contact_probe
+from profile_normal_probe import add_normal_probe
 root = Path(__file__).resolve().parents[1]
 package = types.ModuleType('subdivision_profile')
 package.__path__ = [str(root)]
@@ -45,7 +46,7 @@ for p in mesh.polygons:
 original_a, original_b = [tuple(v.co) for v in mesh.vertices], [tuple(v.co) for v in base.data.vertices]
 
 
-def capture():
+def capture(include_normals=False):
     obj.update_tag()
     bpy.context.view_layer.update()
     evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
@@ -56,6 +57,8 @@ def capture():
         topology = (len(points), [tuple(p.vertices) for p in result.polygons])
         distance = result.attributes.get(merges.ADHESION_DISTANCE)
         d = [v.value for v in distance.data] if distance else None
+        if include_normals:
+            return points, topology, d, [item.vector.copy() for item in result.corner_normals], [loop.vertex_index for loop in result.loops]
         return points, topology, d
     finally:
         evaluated.to_mesh_clear()
@@ -68,6 +71,7 @@ if not 0 <= levels <= 4:
     raise ValueError('Subdivision probe levels must be 0..4')
 direct_source = '--direct-source-normals' in sys.argv
 contact_mode = sys.argv[sys.argv.index('--contact')+1] if '--contact' in sys.argv else None
+normal_mode = sys.argv[sys.argv.index('--normals')+1] if '--normals' in sys.argv else None
 for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMPLE',False),
                            ('catmull-before','CATMULL_CLARK',True),('catmull-after','CATMULL_CLARK',False)):
     if case_filter and case != case_filter:
@@ -96,6 +100,26 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
             raise ValueError('Contact probe is scoped to catmull-after; use --render catmull-after')
         contact_modifier, contact_group = add_contact_probe(obj,base,builder,mode=contact_mode)
     points, topology, distances = capture()
+    normal_modifiers, normal_groups, normal_vertex_group = [], [], None
+    if normal_mode:
+        before_points, before_topology, _, before_normals, loop_vertices = capture(include_normals=True)
+        normal_modifiers, normal_groups, normal_vertex_group = add_normal_probe(obj,base,builder,mode=normal_mode)
+        points, topology, distances, after_normals, _ = capture(include_normals=True)
+        assert topology == before_topology and all((p-q).length < 1e-7 for p,q in zip(points,before_points))
+        changed = max((p-q).length for p,q in zip(before_normals,after_normals))
+        assert changed > 0.01, 'Normal probe had no shading effect'
+        inside_angles, outside_deltas = [], []
+        for vertex,p,q in zip(loop_vertices,before_normals,after_normals):
+            if points[vertex].z < 1e-6:
+                inside_angles.append(math.degrees(math.acos(max(-1,min(1,q.z)))))
+            if points[vertex].z > 0.2:
+                outside_deltas.append((p-q).length)
+        assert max(outside_deltas) < 2e-3, 'Normals outside support changed'
+        if normal_mode == 'gn':
+            assert max(inside_angles) < 1, 'GN contact normals did not match the target'
+        print('NORMALS',normal_mode,'max change',changed,'median contact angle',statistics.median(inside_angles),
+              'contact normals aligned fraction',sum(a<1 for a in inside_angles)/len(inside_angles),
+              'outside delta',max(outside_deltas),'positions/topology unchanged',flush=True)
     assert topology == reference_topology, 'Adhesion changed connectivity'
     assert distances is not None
     foot = [p for p,d in zip(points,distances) if d < 1e-6]
@@ -152,7 +176,13 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
     assert [tuple(v.co) for v in base.data.vertices] == original_b
     if render_case:
         scene = bpy.context.scene
-        scene.render.engine = 'CYCLES'
+        if '--eevee' in sys.argv:
+            try:
+                scene.render.engine = 'BLENDER_EEVEE'
+            except TypeError:
+                scene.render.engine = 'BLENDER_EEVEE_NEXT'
+        else:
+            scene.render.engine = 'CYCLES'
         scene.cycles.samples = 24
         scene.cycles.use_denoising = True
         scene.render.resolution_x = scene.render.resolution_y = 640
@@ -175,10 +205,18 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
             light.data.energy,light.data.size = power,4
             aim(light)
         artifact = case+('-direct-source' if direct_source else '')+('-contact-'+contact_mode if contact_mode else '')
+        artifact += ('-normals-'+normal_mode) if normal_mode else ''
+        artifact += '-eevee' if '--eevee' in sys.argv else ''
         scene.render.filepath = str(output/(artifact+'.png'))
         bpy.ops.wm.save_as_mainfile(filepath=str(output/(artifact+'.blend')))
         bpy.ops.render.render(write_still=True)
         print('PREVIEW',scene.render.filepath,flush=True)
+    for normal_modifier in reversed(normal_modifiers):
+        obj.modifiers.remove(normal_modifier)
+    for normal_group in normal_groups:
+        bpy.data.node_groups.remove(normal_group)
+    if normal_vertex_group:
+        obj.vertex_groups.remove(normal_vertex_group)
     if contact_modifier:
         obj.modifiers.remove(contact_modifier)
         bpy.data.node_groups.remove(contact_group)
