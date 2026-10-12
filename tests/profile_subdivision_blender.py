@@ -15,6 +15,7 @@ from boolean_free_probe import bypass_adhesion_boolean
 from profile_tangent_probe import build_tangent_profile
 from profile_contact_probe import add_contact_probe
 from profile_normal_probe import add_normal_probe
+from profile_underface_probe import add_underface_probe
 root = Path(__file__).resolve().parents[1]
 package = types.ModuleType('subdivision_profile')
 package.__path__ = [str(root)]
@@ -58,7 +59,9 @@ def capture(include_normals=False):
         distance = result.attributes.get(merges.ADHESION_DISTANCE)
         d = [v.value for v in distance.data] if distance else None
         if include_normals:
-            return points, topology, d, [item.vector.copy() for item in result.corner_normals], [loop.vertex_index for loop in result.loops]
+            return (points, topology, d, [item.vector.copy() for item in result.corner_normals],
+                    [loop.vertex_index for loop in result.loops],
+                    [p.normal.copy() for p in result.polygons for _ in p.loop_indices])
         return points, topology, d
     finally:
         evaluated.to_mesh_clear()
@@ -72,6 +75,7 @@ if not 0 <= levels <= 4:
 direct_source = '--direct-source-normals' in sys.argv
 contact_mode = sys.argv[sys.argv.index('--contact')+1] if '--contact' in sys.argv else None
 normal_mode = sys.argv[sys.argv.index('--normals')+1] if '--normals' in sys.argv else None
+underface_mode = sys.argv[sys.argv.index('--underface')+1] if '--underface' in sys.argv else None
 for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMPLE',False),
                            ('catmull-before','CATMULL_CLARK',True),('catmull-after','CATMULL_CLARK',False)):
     if case_filter and case != case_filter:
@@ -100,27 +104,62 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
             raise ValueError('Contact probe is scoped to catmull-after; use --render catmull-after')
         contact_modifier, contact_group = add_contact_probe(obj,base,builder,mode=contact_mode)
     points, topology, distances = capture()
+    underface_modifier = underface_group = None
+    if underface_mode:
+        old_points,old_topology,old_distances = points,topology,distances
+        underface_modifier,underface_group = add_underface_probe(obj,builder,underface_mode)
+        points,topology,distances = capture()
+        assert len(points) == len(old_points)
+        if underface_mode == 'remove-cap':
+            assert all((p-q).length < 1e-7 for p,q in zip(points,old_points))
+            assert len(topology[1]) < len(old_topology[1])
+        else:
+            assert topology == old_topology
+            assert all(abs(p.x-q.x)+abs(p.y-q.y)<1e-7 for p,q in zip(points,old_points))
+            assert max((p-q).length for p,q,d in zip(points,old_points,old_distances) if d>=0.25) < 1e-7
+        print('UNDERFACE',underface_mode,'faces before/after',len(old_topology[1]),len(topology[1]),
+              'maximum position change',max((p-q).length for p,q in zip(points,old_points)),flush=True)
     normal_modifiers, normal_groups, normal_vertex_group = [], [], None
     if normal_mode:
-        before_points, before_topology, _, before_normals, loop_vertices = capture(include_normals=True)
+        before_points, before_topology, _, before_normals, loop_vertices, geometric_normals = capture(include_normals=True)
         normal_modifiers, normal_groups, normal_vertex_group = add_normal_probe(obj,base,builder,mode=normal_mode)
-        points, topology, distances, after_normals, _ = capture(include_normals=True)
+        points, topology, distances, after_normals, _, _ = capture(include_normals=True)
         assert topology == before_topology and all((p-q).length < 1e-7 for p,q in zip(points,before_points))
         changed = max((p-q).length for p,q in zip(before_normals,after_normals))
-        assert changed > 0.01, 'Normal probe had no shading effect'
+        if normal_mode == 'gn-facing':
+            # A valid directional mask may exclude the entire contact band.
+            # Report this negative result instead of mistaking it for a fix.
+            print('FACING MASK effective normal change',changed,flush=True)
+        else:
+            assert changed > 0.01, 'Normal probe had no shading effect'
         inside_angles, outside_deltas = [], []
         for vertex,p,q in zip(loop_vertices,before_normals,after_normals):
-            if points[vertex].z < 1e-6:
+            # Buried vertices are not points on the target surface. Do not
+            # require them to have the exact target normal merely because z<0.
+            if abs(points[vertex].z) < 1e-6:
                 inside_angles.append(math.degrees(math.acos(max(-1,min(1,q.z)))))
             if points[vertex].z > 0.2:
                 outside_deltas.append((p-q).length)
         assert max(outside_deltas) < 2e-3, 'Normals outside support changed'
-        if normal_mode == 'gn':
+        if normal_mode == 'gn' and inside_angles:
             assert max(inside_angles) < 1, 'GN contact normals did not match the target'
-        print('NORMALS',normal_mode,'max change',changed,'median contact angle',statistics.median(inside_angles),
-              'contact normals aligned fraction',sum(a<1 for a in inside_angles)/len(inside_angles),
+        if normal_mode == 'gn-safe' and inside_angles:
+            assert max(min(a,180-a) for a in inside_angles) < 1
+        opposed = sum(g.dot(n)<-1e-5 for vertex,g,n in zip(loop_vertices,geometric_normals,after_normals)
+                      if 1e-5<points[vertex].z<0.15)
+        exposed = [g for vertex,g in zip(loop_vertices,geometric_normals)
+                   if 1e-5<points[vertex].z<0.15]
+        print('CONTACT GEOMETRY exposed corners',len(exposed),
+              'downward geometric corners',sum(g.z < -1e-5 for g in exposed),
+              'minimum geometric normal z',min((g.z for g in exposed),default=None),flush=True)
+        if normal_mode == 'gn-safe':
+            assert opposed == 0, 'Exposed shading normals oppose the geometric surface'
+        print('NORMALS',normal_mode,'max change',changed,'median contact angle',statistics.median(inside_angles) if inside_angles else None,
+              'exposed hemisphere mismatches',opposed,
+              'contact normals aligned fraction',sum(a<1 for a in inside_angles)/len(inside_angles) if inside_angles else None,
               'outside delta',max(outside_deltas),'positions/topology unchanged',flush=True)
-    assert topology == reference_topology, 'Adhesion changed connectivity'
+    if underface_mode != 'remove-cap':
+        assert topology == reference_topology, 'Adhesion changed connectivity'
     assert distances is not None
     foot = [p for p,d in zip(points,distances) if d < 1e-6]
     exact_source_contact = bool(foot)
@@ -144,8 +183,9 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
             if dr > 1e-6:
                 contact_angles.append(math.degrees(math.atan2(dz,dr)))
     if contact_mode:
-        assert max(abs(p.z) for p in perimeter) < 1e-6, 'Contact perimeter remains detached'
-        assert min(p.z for p in points) > -1e-6
+        if underface_mode not in ('bury-contact','bury-lip'):
+            assert max(abs(p.z) for p in perimeter) < 1e-6, 'Contact perimeter remains detached'
+            assert min(p.z for p in points) > -1e-6
         assert max(abs(math.hypot(p.x,p.y)-math.hypot(q.x,q.y)) for p,q in zip(points,uncorrected)) < 2e-6
         assert max((p-q).length for p,q,d in zip(points,uncorrected,distances) if d >= 0.25) < 1e-7
     outside_delta = max((p-q).length for p,q,d in zip(points,reference,distances) if d > 1.4)
@@ -153,9 +193,15 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
     shape = [tuple(p) for p in points]
     base.location.z -= 0.025
     moved, moved_topology, _ = capture()
-    assert moved_topology == topology and max((p-q).length for p,q in zip(points,moved)) > 1e-4
+    assert len(moved) == len(points) and max((p-q).length for p,q in zip(points,moved)) > 1e-4
+    if underface_mode == 'remove-cap':
+        print('DIAGNOSTIC moving target changes cap removal face count',len(topology[1]),len(moved_topology[1]),flush=True)
+    else:
+        assert moved_topology == topology
     base.location.z += 0.025
-    assert max((p-q).length for p,q in zip(points,capture()[0])) < 1e-7
+    restored,restored_topology,_ = capture()
+    assert restored_topology == topology
+    assert max((p-q).length for p,q in zip(points,restored)) < 1e-7
     times = []
     for _ in range(5):
         obj.update_tag()
@@ -192,6 +238,8 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
         mat.diffuse_color = (0.4,0.44,0.48,1)
         obj.data.materials.append(mat)
         base.data.materials.append(mat)
+        if '--no-shadow' in sys.argv:
+            obj.visible_shadow = False
         def aim(item):
             item.rotation_euler = (Vector((0,0,0.75))-item.location).to_track_quat('-Z','Y').to_euler()
         bpy.ops.object.camera_add(location=(4,-6,3))
@@ -206,7 +254,9 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
             aim(light)
         artifact = case+('-direct-source' if direct_source else '')+('-contact-'+contact_mode if contact_mode else '')
         artifact += ('-normals-'+normal_mode) if normal_mode else ''
+        artifact += ('-'+underface_mode) if underface_mode else ''
         artifact += '-eevee' if '--eevee' in sys.argv else ''
+        artifact += '-no-shadow' if '--no-shadow' in sys.argv else ''
         scene.render.filepath = str(output/(artifact+'.png'))
         bpy.ops.wm.save_as_mainfile(filepath=str(output/(artifact+'.blend')))
         bpy.ops.render.render(write_still=True)
@@ -217,6 +267,9 @@ for case, kind, before in (('linear-before','SIMPLE',True),('linear-after','SIMP
         bpy.data.node_groups.remove(normal_group)
     if normal_vertex_group:
         obj.vertex_groups.remove(normal_vertex_group)
+    if underface_modifier:
+        obj.modifiers.remove(underface_modifier)
+        bpy.data.node_groups.remove(underface_group)
     if contact_modifier:
         obj.modifiers.remove(contact_modifier)
         bpy.data.node_groups.remove(contact_group)

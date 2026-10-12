@@ -24,7 +24,7 @@ def add_normal_probe(obj, base, builder, *, mode):
         transfer.mix_factor = 1.0
         transfer.vertex_group = group.name
         return [proximity, transfer], [], group
-    if mode != 'gn' or not hasattr(bpy.types, 'GeometryNodeSetMeshNormal'):
+    if mode not in ('gn','gn-safe','gn-facing') or not hasattr(bpy.types, 'GeometryNodeSetMeshNormal'):
         raise ValueError('GN custom normals unavailable; use transfer on Blender 4.2')
     group = bpy.data.node_groups.new('Final contact normals', 'GeometryNodeTree')
     group.interface.new_socket(name='Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
@@ -46,9 +46,30 @@ def add_normal_probe(obj, base, builder, *, mode):
                m(nodes, links, 'SUBTRACT', 3.0, m(nodes, links, 'MULTIPLY', u, 2.0)))
     weight = m(nodes, links, 'SUBTRACT', 1.0, smooth)
     own = nodes.new('GeometryNodeInputNormal').outputs[0]
+    target_normal = sample.outputs['Value']
+    if mode == 'gn-facing':
+        # Never reverse B's normal on the underside. Fade its influence using
+        # A's continuous shading normal, rather than a per-face sign switch.
+        facing = m(nodes, links, 'DIVIDE',
+                   v(nodes, links, 'DOT_PRODUCT', own, target_normal), 0.5, clamp=True)
+        facing = m(nodes, links, 'MULTIPLY', m(nodes, links, 'MULTIPLY', facing, facing),
+                   m(nodes, links, 'SUBTRACT', 3.0, m(nodes, links, 'MULTIPLY', facing, 2.0)))
+        weight = m(nodes, links, 'MULTIPLY', weight, facing)
+        smooth = m(nodes, links, 'SUBTRACT', 1.0, weight)
+    if mode == 'gn-safe':
+        face = nodes.new('GeometryNodeFaceOfCorner')
+        links.new(nodes.new('GeometryNodeInputIndex').outputs[0],face.inputs['Corner Index'])
+        geometric = nodes.new('GeometryNodeSampleIndex')
+        geometric.data_type,geometric.domain = 'FLOAT_VECTOR','FACE'
+        links.new(gin.outputs['Geometry'],geometric.inputs['Geometry'])
+        links.new(nodes.new('GeometryNodeInputNormal').outputs[0],geometric.inputs['Value'])
+        links.new(face.outputs['Face Index'],geometric.inputs['Index'])
+        reversed_normal = m(nodes,links,'LESS_THAN',v(nodes,links,'DOT_PRODUCT',geometric.outputs['Value'],target_normal),0.0)
+        sign = builder._switch(nodes,links,'FLOAT',reversed_normal,1.0,-1.0)
+        target_normal = v(nodes,links,'SCALE',target_normal,scale=sign)
     normal = v(nodes, links, 'NORMALIZE', v(nodes, links, 'ADD',
                 v(nodes, links, 'SCALE', own, scale=smooth),
-                v(nodes, links, 'SCALE', sample.outputs['Value'], scale=weight)))
+                v(nodes, links, 'SCALE', target_normal, scale=weight)))
     set_normal = nodes.new('GeometryNodeSetMeshNormal')
     set_normal.mode, set_normal.domain = 'FREE', 'CORNER'
     links.new(gin.outputs['Geometry'], set_normal.inputs['Mesh'])
