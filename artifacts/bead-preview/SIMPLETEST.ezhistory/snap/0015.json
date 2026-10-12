@@ -1,0 +1,22 @@
+{
+ "version": 3,
+ "id": 15,
+ "file": "snap/0015.blend",
+ "time": 1791740907.0261192,
+ "hash": "c94ef8f6366a05c15c98f010c0fc0aa96a222334",
+ "label": "자동",
+ "milestone": false,
+ "trigger": "466db1a722e4",
+ "members": [
+  {
+   "uid": "466db1a722e4",
+   "name": "Cylinder.002",
+   "type": "MESH"
+  }
+ ],
+ "mods": {
+  "466db1a722e4": 0
+ },
+ "verts": 64,
+ "size": 62838
+}

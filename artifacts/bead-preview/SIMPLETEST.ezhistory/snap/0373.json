@@ -1,0 +1,28 @@
+{
+ "version": 3,
+ "id": 373,
+ "file": "snap/0373.blend",
+ "time": 1791783534.2995327,
+ "hash": "d417af9b9473ae59c897d958259d97a27a45ccc6",
+ "label": "자동",
+ "milestone": false,
+ "trigger": "351de1f813e1",
+ "members": [
+  {
+   "uid": "351de1f813e1",
+   "name": "Cube.002",
+   "type": "MESH"
+  },
+  {
+   "uid": "8906bbaa81d1",
+   "name": "Cube",
+   "type": "MESH"
+  }
+ ],
+ "mods": {
+  "351de1f813e1": 3,
+  "8906bbaa81d1": 0
+ },
+ "verts": 32,
+ "size": 68904
+}

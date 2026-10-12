@@ -1,0 +1,14 @@
+schema_version = "1.0.0"
+
+id = "ezhardsurface"
+version = "0.28.1"
+name = "ezHardSurface"
+tagline = "SketchUp-style click-drag-click hard surface modeling"
+maintainer = "stoneep"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+
+tags = ["Modeling", "Mesh", "3D View"]

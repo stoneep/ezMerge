@@ -1,0 +1,28 @@
+{
+ "version": 3,
+ "id": 154,
+ "file": "snap/0154.blend",
+ "time": 1791747272.426406,
+ "hash": "6dd703b54cd1b0c97b4e35a7c0162c42ef4bda89",
+ "label": "Apply/삭제 직전",
+ "milestone": true,
+ "trigger": "8906bbaa81d1",
+ "members": [
+  {
+   "uid": "8906bbaa81d1",
+   "name": "Cube",
+   "type": "MESH"
+  },
+  {
+   "uid": "351de1f813e1",
+   "name": "Cube.002",
+   "type": "MESH"
+  }
+ ],
+ "mods": {
+  "8906bbaa81d1": 0,
+  "351de1f813e1": 3
+ },
+ "verts": 32,
+ "size": 68913
+}

@@ -1,0 +1,22 @@
+{
+ "version": 3,
+ "id": 3,
+ "file": "snap/0003.blend",
+ "time": 1791742275.5000486,
+ "hash": "07f442f3a303741faeee27bfde664ff872fcf993",
+ "label": "자동",
+ "milestone": false,
+ "trigger": "89ee625108ba",
+ "members": [
+  {
+   "uid": "89ee625108ba",
+   "name": "Area.001",
+   "type": "LIGHT"
+  }
+ ],
+ "mods": {
+  "89ee625108ba": 0
+ },
+ "verts": 0,
+ "size": 61558
+}

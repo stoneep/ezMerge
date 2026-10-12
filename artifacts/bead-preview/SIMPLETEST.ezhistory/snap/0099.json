@@ -1,0 +1,28 @@
+{
+ "version": 3,
+ "id": 99,
+ "file": "snap/0099.blend",
+ "time": 1791743790.165225,
+ "hash": "afe30c932f1ff13b05d646ca96579f465c20b51d",
+ "label": "자동",
+ "milestone": false,
+ "trigger": "2240625153c5",
+ "members": [
+  {
+   "uid": "2240625153c5",
+   "name": "Cylinder.003",
+   "type": "MESH"
+  },
+  {
+   "uid": "8906bbaa81d1",
+   "name": "Cube.001",
+   "type": "MESH"
+  }
+ ],
+ "mods": {
+  "2240625153c5": 1,
+  "8906bbaa81d1": 0
+ },
+ "verts": 264,
+ "size": 159650
+}

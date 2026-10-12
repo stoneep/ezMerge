@@ -1,0 +1,28 @@
+{
+ "version": 3,
+ "id": 113,
+ "file": "snap/0113.blend",
+ "time": 1791744028.0422158,
+ "hash": "c8d6e26e1d4454a4b2fdc5903dd63847eddfa282",
+ "label": "Apply/삭제 직전",
+ "milestone": true,
+ "trigger": "2240625153c5",
+ "members": [
+  {
+   "uid": "2240625153c5",
+   "name": "Cylinder.003",
+   "type": "MESH"
+  },
+  {
+   "uid": "8906bbaa81d1",
+   "name": "Cube.001",
+   "type": "MESH"
+  }
+ ],
+ "mods": {
+  "2240625153c5": 3,
+  "8906bbaa81d1": 0
+ },
+ "verts": 264,
+ "size": 74676
+}

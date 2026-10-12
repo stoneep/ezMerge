@@ -1,0 +1,22 @@
+{
+ "version": 3,
+ "id": 388,
+ "file": "snap/0388.blend",
+ "time": 1791787356.2425303,
+ "hash": "d6001b9ad96544c073862e581a7275dadb908401",
+ "label": "자동",
+ "milestone": false,
+ "trigger": "50d106da5b72",
+ "members": [
+  {
+   "uid": "50d106da5b72",
+   "name": "Cylinder.002 Contact Patch",
+   "type": "MESH"
+  }
+ ],
+ "mods": {
+  "50d106da5b72": 0
+ },
+ "verts": 6875,
+ "size": 379489
+}

@@ -1,0 +1,22 @@
+{
+ "version": 3,
+ "id": 4,
+ "file": "snap/0004.blend",
+ "time": 1791742275.5030482,
+ "hash": "35d552d8e8fce0d8b584c3185a5c85a9bd57c290",
+ "label": "자동",
+ "milestone": false,
+ "trigger": "7e74ae9d3d88",
+ "members": [
+  {
+   "uid": "7e74ae9d3d88",
+   "name": "Camera",
+   "type": "CAMERA"
+  }
+ ],
+ "mods": {
+  "7e74ae9d3d88": 0
+ },
+ "verts": 0,
+ "size": 61353
+}
