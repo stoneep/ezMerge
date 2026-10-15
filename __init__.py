@@ -10,9 +10,9 @@ bl_info = {
     "category": "3D View",
 }
 
-from . import gizmos, keymaps, operators, settings, tools, ui  # noqa: E402
+from . import gizmos, keymaps, merge_recapture, merge_templates, operators, settings, tools, ui  # noqa: E402
 
-_modules = (settings, operators, gizmos, tools, ui, keymaps)
+_modules = (settings, operators, merge_recapture, merge_templates, gizmos, tools, ui, keymaps)
 
 
 def register():

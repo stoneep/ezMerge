@@ -557,7 +557,7 @@ def _relax_spread(nodes, links, geometry, target, shaded, strength, passes, infl
     return geometry
 
 
-def _build_adhesion(ng):
+def _build_adhesion(ng, *, recaptured=False):
     """Deform A's exposed contact patch, rather than overlaying a ribbon.
 
     All lengths are A-local. The exact cut removes only the part hidden in B.
@@ -648,7 +648,9 @@ def _build_adhesion(ng):
     drop.domain = 'FACE'
     links.new(difference.outputs['Mesh'], drop.inputs['Geometry'])
     links.new(_math(nodes, links, 'LESS_THAN', cut_proximity.outputs['Distance'], 1e-6), drop.inputs['Selection'])
-    prepared = drop.outputs['Geometry']
+    # A captured baseline must not be cut against B again. Ordinary Bead keeps
+    # its existing preparation unchanged; the experimental mode opts in.
+    prepared = dense_source if recaptured else drop.outputs['Geometry']
     position = nodes.new('GeometryNodeInputPosition').outputs[0]
     proximity = nodes.new('GeometryNodeProximity')
     proximity.target_element = 'FACES'

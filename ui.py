@@ -1,6 +1,6 @@
 import bpy
 
-from . import cuts, joins, merges
+from . import cuts, joins, merge_recapture, merge_templates, merges
 from . import shapes as cn
 from .handles import TILT_EPSILON, tilt_degrees
 from .operators import (
@@ -40,7 +40,7 @@ class VIEW3D_PT_ezhs(bpy.types.Panel):
         self.draw_cuts(layout, obj)
         if len(context.selected_objects) > 1:
             layout.operator("ezhs.join_shapes", icon='AUTOMERGE_ON')
-            layout.operator("ezhs.merge_shapes", icon='SNAP_FACE')
+        merge_templates.draw_creation_panel(layout, context, obj)
         self.draw_merges(layout, obj)
         mod = cn.find_modifier(obj)
         if mod is None:
@@ -71,10 +71,15 @@ class VIEW3D_PT_ezhs(bpy.types.Panel):
     def draw_merges(layout, obj):
         if obj is None or obj.type != 'MESH':
             return
+        if merge_recapture.draw_panel(layout, obj):
+            return
         for mod in merges.merge_modifiers(obj):
             base = merges.base_of(mod)
             box = layout.box()
             box.label(text=f"Merged onto {base.name}" if base else "Merge (no mesh)", icon='SNAP_FACE')
+            if merge_templates.PAIR_KEY in mod.node_group:
+                box.label(text=mod.node_group[merge_templates.PAIR_KEY].replace('_TO_', ' -> ').replace('_', ' ').title())
+                box.label(text='Template backend: Bead Preview', icon='INFO')
             method = merges.method_of(mod)
             row = box.row(align=True)
             for text, value in (("Rows", merges.ROWS), ("Deform", merges.DEFORM),
@@ -84,6 +89,7 @@ class VIEW3D_PT_ezhs(bpy.types.Panel):
             if method == merges.BEAD and merges.is_surface_adhesion(mod):
                 col = box.column(align=True)
                 box.label(text="Surface Adhesion")
+                box.operator("ezhs.recapture", text="Recapture (Experimental)", icon='FILE_REFRESH').modifier = mod.name
                 for name in (merges.GLOBAL, merges.INFLUENCE_RADIUS, merges.MERGE_RADIUS, merges.PUSH_STRENGTH):
                     cn.draw_input(col, mod, name)
                     if name == merges.INFLUENCE_RADIUS and mod.node_group.interface.items_tree.get(merges.CONTACT_RADIUS) is not None:
